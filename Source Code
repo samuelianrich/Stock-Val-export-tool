@@ -1,0 +1,112 @@
+# Currently the code wille export an excel workbook with all of the variables from the Alpha Vantage API for the following reports:Income Statement, Statement of Cash Flows, Balance Sheet.
+# The next enahancement will be sorting the data into a GAAP format so that we can calculate and compare the financial ratios for each company.
+
+
+import tkinter as tk
+from tkinter import messagebox, ttk
+import pandas as pd
+from alpha_vantage.fundamentaldata import FundamentalData
+import subprocess
+import threading
+
+
+def fetch_reports(stock_symbol, report_type='annual'):
+    api_key = 'YOUR API HERE'
+    fd = FundamentalData(key=api_key, output_format='pandas')
+
+    try:
+        if report_type == 'quarterly':
+            income_statement, _ = fd.get_income_statement_quarterly(symbol=stock_symbol)
+            cash_flows, _ = fd.get_cash_flow_quarterly(symbol=stock_symbol)
+            balance_sheet, _ = fd.get_balance_sheet_quarterly(symbol=stock_symbol)
+        else:
+            income_statement, _ = fd.get_income_statement_annual(symbol=stock_symbol)
+            cash_flows, _ = fd.get_cash_flow_annual(symbol=stock_symbol)
+            balance_sheet, _ = fd.get_balance_sheet_annual(symbol=stock_symbol)
+
+        return income_statement, cash_flows, balance_sheet
+    except ValueError:
+        messagebox.showerror("Error", "Failed to fetch reports. Please check the stock symbol.")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+
+def export_to_excel(income_statement, cash_flows, balance_sheet, stock_symbol, report_type):
+    directory = r"C:\YOUR_DESIRED DIRECTORY LOCATION HERE"
+
+    # Updated file path to include report type
+    file_path = f"{directory}/{stock_symbol}_{report_type}_Financial_Statements.xlsx"
+
+    writer = pd.ExcelWriter(file_path, engine='xlsxwriter')
+
+    # Transpose the DataFrames
+    income_statement_t = income_statement.set_index('fiscalDateEnding').transpose()
+    cash_flows_t = cash_flows.set_index('fiscalDateEnding').transpose()
+    balance_sheet_t = balance_sheet.set_index('fiscalDateEnding').transpose()
+
+    # Function to attempt to convert a value to a float, or return the value unchanged if not convertible
+    def convert_to_float(value):
+        if value == "None":
+            return 0.0
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+    # Convert values to float type
+    income_statement_t = income_statement_t.applymap(convert_to_float)
+    cash_flows_t = cash_flows_t.applymap(convert_to_float)
+    balance_sheet_t = balance_sheet_t.applymap(convert_to_float)
+
+    # Write each transposed and converted DataFrame to a separate worksheet
+    income_statement_t.to_excel(writer, sheet_name='Income Statement')
+    cash_flows_t.to_excel(writer, sheet_name='Statement of Cash Flows')
+    balance_sheet_t.to_excel(writer, sheet_name='Balance Sheet')
+
+    writer.close()
+
+    messagebox.showinfo("Export Successful", "Data exported to Excel files.")
+    subprocess.Popen(f'explorer "{directory}"')
+
+
+
+
+if __name__ == "__main__":
+    window = tk.Tk()
+    window.title("Stock Analysis Tool")
+
+    label = tk.Label(window, text="Enter stock ticker symbol:")
+    label.pack()
+
+    entry = tk.Entry(window)
+    entry.pack()
+
+    label_report_type = tk.Label(window, text="Choose report type:")
+    label_report_type.pack()
+
+    report_type = ttk.Combobox(window, values=["annual", "quarterly"])
+    report_type.pack()
+    report_type.current(0)
+
+    def show_data():
+        stock_symbol = entry.get().strip()
+        selected_report_type = report_type.get()
+
+        if not stock_symbol:
+            messagebox.showerror("Error", "Please enter a stock symbol.")
+            return
+
+        def fetch_and_display_data():
+            income_statement, cash_flows, balance_sheet = fetch_reports(stock_symbol, selected_report_type)
+
+            if income_statement.empty or cash_flows.empty or balance_sheet.empty:
+                return
+
+            # Pass the selected_report_type to export_to_excel function
+            export_to_excel(income_statement, cash_flows, balance_sheet, stock_symbol, selected_report_type)
+
+        threading.Thread(target=fetch_and_display_data).start()
+
+    button = tk.Button(window, text="Show Data", command=show_data)
+    button.pack()
+
+    window.mainloop()
